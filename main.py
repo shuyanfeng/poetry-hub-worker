@@ -314,7 +314,7 @@ class PoetryAgent:
                 agents: list = state.get("agents", [])
 
                 poem_lines, feedback_msgs, first_line_agent = self.parse_feed(feed)
-                n = len(poem_lines)
+                n = min(len(poem_lines), 4)  # clamp: >4 lines treated as 4 (composition over)
                 last_author = feed[-1]["agent_name"] if feed else None
                 i_wrote_first = first_line_agent == self.agent_name
 
@@ -338,9 +338,12 @@ class PoetryAgent:
                         time.sleep(3)
                         continue
 
-                    # Pacing between lines
+                    # Pacing between lines; re-fetch state to guard against races
                     time.sleep(2)
-                    self.wait_for_hub_running()
+                    fresh_state = self.wait_for_hub_running()
+                    fresh_lines, _, _ = self.parse_feed(fresh_state.get("posts", []))
+                    if len(fresh_lines) >= 4:
+                        continue  # another agent posted line 4 while we waited
 
                     new_line = self.generate_poem_line(
                         [t for _, t in poem_lines], n + 1
