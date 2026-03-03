@@ -359,7 +359,13 @@ class PoetryAgent:
                     my_feedbacks = [t for a, t in feedback_msgs if a == self.agent_name]
                     if not my_feedbacks:
                         time.sleep(2)
-                        self.wait_for_hub_running()
+                        fresh_state = self.wait_for_hub_running()
+                        # Guard: skip if FINAL: was posted while we waited
+                        if any(
+                            p.get("text", "").startswith("FINAL:")
+                            for p in fresh_state.get("posts", [])
+                        ):
+                            continue
                         fb = self.generate_feedback([t for _, t in poem_lines])
                         self.post_line(fb)
                         continue
@@ -374,7 +380,14 @@ class PoetryAgent:
                         if all_responded or elapsed >= 20:
                             logger.info("Generating final poem (elapsed=%.0f s)…", elapsed)
                             time.sleep(2)
-                            self.wait_for_hub_running()
+                            fresh_state = self.wait_for_hub_running()
+                            # Guard: skip if another agent already posted FINAL:
+                            if any(
+                                p.get("text", "").startswith("FINAL:")
+                                for p in fresh_state.get("posts", [])
+                            ):
+                                feedback_phase_start = None
+                                continue
 
                             final = self.generate_final_poem(
                                 [t for _, t in poem_lines],
