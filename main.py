@@ -125,7 +125,7 @@ class PoetryAgent:
 
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         self.llm: openai.OpenAI | None = (
-            openai.OpenAI(api_key=api_key) if api_key else None
+            openai.OpenAI(api_key=api_key, timeout=30.0) if api_key else None
         )
         if not self.llm:
             logger.warning("No OPENAI_API_KEY found — using fallback lines.")
@@ -406,8 +406,39 @@ class PoetryAgent:
                             )
                             time.sleep(5)
                     else:
-                        # Not the first-line agent — just wait
-                        time.sleep(5)
+                        # Not the first-line agent — wait, but take over if
+                        # first-line agent appears dead (no FINAL: after 60 s)
+                        elapsed = (
+                            time.time() - feedback_phase_start
+                            if feedback_phase_start is not None
+                            else 0
+                        )
+                        if elapsed >= 60:
+                            logger.info(
+                                "First-line agent appears dead (%.0f s) — taking over finalization…",
+                                elapsed,
+                            )
+                            time.sleep(2)
+                            fresh_state = self.wait_for_hub_running()
+                            fresh_posts = fresh_state.get("posts", [])
+                            if any(
+                                p.get("text", "").startswith("FINAL:")
+                                for p in fresh_posts
+                            ):
+                                feedback_phase_start = None
+                                continue  # first-line agent recovered; wait for reset
+                            final = self.generate_final_poem(
+                                [t for _, t in poem_lines],
+                                [t for _, t in feedback_msgs],
+                            )
+                            self.post_line(final)
+                            logger.info("Backup finalizer: waiting 20 s before reset…")
+                            time.sleep(20)
+                            self.control("reset")
+                            feedback_phase_start = None
+                            logger.info("Backup round complete — starting new round.")
+                        else:
+                            time.sleep(5)
 
                 else:
                     # Unexpected state
